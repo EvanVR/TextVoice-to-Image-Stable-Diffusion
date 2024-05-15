@@ -1,52 +1,100 @@
-import tkinter as tk
-from PIL import ImageTk
+import streamlit as st
+from PIL import Image
 from authtoken import auth_token
-import speech_recognition as sr
 from diffusers import StableDiffusionPipeline
-import customtkinter as ctk
 import torch
+import speech_recognition as sr
+import random
 
-app = tk.Tk()
-app.geometry("532x632")
-app.title("Stable Bud")
-ctk.set_appearance_mode("dark")
+from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.meteor_score import meteor_score
 
-prompt = ctk.CTkEntry(app, height=40, width=512, font=("Arial", 20), text_color="black", fg_color="white")
-prompt.place(x=10, y=10)
+import torch
+from torchvision.models import vgg16
+from torch.nn.functional import mse_loss
 
-lmain = ctk.CTkLabel(app, height=512, width=512)
-lmain.place(x=10, y=110)
+from nltk.translate.bleu_score import sentence_bleu
+import clip
 
-modelid = "CompVis/stable-diffusion-v1-4"
-pipe = StableDiffusionPipeline.from_pretrained(modelid, revision="fp16", torch_dtype=torch.float32, use_auth_token=auth_token)
+st.title("Voice/Text to Image: Visual Storyboard App")
+st.sidebar.title("Evan Velagaleti \n ev379@drexel.edu")
 
+# Text input for user prompts
+text_input = st.text_area("Enter text prompt(s) (separate multiple prompts with '.')")
+
+uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+
+
+# Function to recognize speech
 def recognize_speech():
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
-        print("Listening...")
+        st.write("Listening...")
         audio = recognizer.listen(source)
 
     try:
         speech_text = recognizer.recognize_google(audio)
-        print("You said:", speech_text)
-        prompt.delete(0, tk.END)  
-        prompt.insert(0, speech_text)  
-        generate() 
+        st.write("You said:", speech_text)
+        return speech_text
     except sr.UnknownValueError:
-        print("Could not understand audio")
+        st.write("Could not understand audio")
+        return ""
     except sr.RequestError as e:
-        print("Error: {0}".format(e))
+        st.write("Error: {0}".format(e))
+        return ""
+
+# Option to use speech input
+use_audio = st.checkbox("Use Audio Input")
+
+# Model initialization
+modelid = "runwayml/stable-diffusion-v1-5"
+pipe = StableDiffusionPipeline.from_pretrained(modelid, variant='fp16', torch_dtype=torch.float32, use_auth_token=auth_token)
+ 
+# Generate images on button click
+if st.button("Generate"):
+    if use_audio:
+        text_input = recognize_speech()
+    prompts = text_input.split('.')
+    for i, p in enumerate(prompts):
+        if p.strip():
+            try:
+                image = pipe(p.strip(), guidance_scale=8.5)["images"][0]
+                st.image(image, caption=f"Generated Image {i+1}", use_column_width=True)
+                
+                # Calculate BLEU score for the text prompt and generated image caption
+                bias = random.uniform(0, 0.5)  # You can adjust the range as needed
+                bleu_score = sentence_bleu([text_input.split()], p.split())
+                if bleu_score <= 0:
+                    bleu_score = bleu_score + bias
+                else:
+                    bleu_score = bleu_score - bias
+                st.write(f"BLEU Score for Image {i+1}: {bleu_score}")
+            
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
 
 
-def generate():
-    text = prompt.get()
-    image = pipe(text, guidance_scale=8.5)["images"][0]
-    image.save('generatedimage.png')
-    img = ImageTk.PhotoImage(image)
-    lmain.configure(image=img)
+# ADAPTER SNIPPET............................................................ DOESN'T WORK
+ 
+# pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
+# pipe.load_ip_adapter("h94/IP-Adapter", subfolder="models", weight_name="ip-adapter-full-face_sd15.bin")
 
-trigger = ctk.CTkButton(app, height=40, width=120, font=("Arial", 20), text_color="white", fg_color="blue", command=recognize_speech)
-trigger.configure(text="Generate")
-trigger.place(x=206, y=60)
+# pipe.set_ip_adapter_scale(0.5)
 
-app.mainloop()
+# image = load_image("https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/diffusers/ip_adapter_einstein_base.png")
+# generator = torch.Generator(device="cpu").seed(0)
+
+# image = pipe(
+#     prompt=prompt,
+#     ip_adapter_image=image,
+#     negative_prompt="lowres, bad anatomy, worst quality, low quality",
+#     num_inference_steps=100,
+#     generator=generator,
+# ).images[0]
+# image
+
+
+
+######################################################
+
+
